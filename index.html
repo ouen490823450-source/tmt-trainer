@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="TMTトレーナー">
+<meta name="theme-color" content="#F3F6F7">
+<title>TMT 様式 机上課題トレーナー</title>
+<style>
+  :root{
+    --paper:#F3F6F7;        /* clinic chrome */
+    --field:#FFFFFF;        /* play field, max contrast */
+    --ink:#16262E;          /* deep slate text */
+    --muted:#5B6F78;        /* secondary text */
+    --line:#D6E0E3;         /* hairlines */
+    --teal:#0E7C86;         /* primary / done */
+    --teal-soft:#E2F0F1;
+    --amber:#E08A1E;        /* next target highlight */
+    --amber-soft:#FBEAD0;
+    --error:#C0392B;
+    --ring:#2A4654;         /* idle target ring */
+    --shadow:0 1px 2px rgba(22,38,46,.08),0 6px 18px rgba(22,38,46,.07);
+    --r:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overscroll-behavior:none}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Yu Gothic UI",Meiryo,"Noto Sans CJK JP","Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;min-height:100%;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-touch-callout:none;
+    user-select:none;-webkit-user-select:none;
+    touch-action:manipulation;
+  }
+  .wrap{
+    max-width:1200px;width:100%;margin:0 auto;flex:1;display:flex;flex-direction:column;
+    min-height:100vh;min-height:100dvh;
+    padding:14px 14px 28px;
+    padding-left:max(14px,env(safe-area-inset-left));
+    padding-right:max(14px,env(safe-area-inset-right));
+    padding-bottom:max(28px,env(safe-area-inset-bottom));
+    padding-top:max(14px,env(safe-area-inset-top));
+  }
+
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  header h1{font-size:20px;font-weight:700;letter-spacing:.01em;margin:0}
+  header .sub{font-size:13px;color:var(--muted)}
+
+  /* control bar */
+  .bar{
+    background:#fff;border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:12px 14px;display:flex;gap:18px;
+    align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;
+  }
+  .ctl{display:flex;flex-direction:column;gap:6px}
+  .ctl > .lab{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff}
+  .seg button{
+    appearance:none;border:0;background:#fff;color:var(--ink);
+    font:inherit;font-size:15px;padding:9px 16px;cursor:pointer;min-height:48px;
+    border-right:1px solid var(--line);transition:background .12s,color .12s;
+  }
+  .seg button:last-child{border-right:0}
+  .seg button[aria-pressed="true"]{background:var(--teal);color:#fff}
+  .spacer{flex:1}
+
+  .start{
+    appearance:none;border:0;border-radius:12px;background:var(--teal);color:#fff;
+    font:inherit;font-weight:700;font-size:16px;padding:0 24px;height:52px;min-width:148px;
+    cursor:pointer;box-shadow:var(--shadow);transition:filter .12s,transform .04s;
+  }
+  .start:hover{filter:brightness(1.06)}
+  .start:active{transform:translateY(1px)}
+  .ghost{
+    appearance:none;background:#fff;border:1px solid var(--line);border-radius:12px;
+    color:var(--ink);font:inherit;font-size:15px;padding:0 18px;height:52px;cursor:pointer;min-width:108px;
+  }
+  .ghost:hover{background:#f7fafb}
+
+  /* live readouts */
+  .stats{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .stat{
+    flex:1;min-width:120px;background:#fff;border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:10px 14px;
+  }
+  .stat .k{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em}
+  .stat .v{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px}
+  .stat .v small{font-size:15px;font-weight:600;color:var(--muted);margin-left:3px}
+  .stat.err .v{color:var(--error)}
+
+  /* instruction strip */
+  .hint{
+    background:var(--amber-soft);border:1px solid #F0D7A8;border-radius:12px;
+    padding:9px 14px;font-size:15px;margin-bottom:10px;display:flex;gap:8px;align-items:center;
+  }
+  .hint b{color:#9a5b00}
+
+  /* play field — grows to fill the iPad screen */
+  .stage{position:relative;background:var(--field);border:1px solid var(--line);
+    border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;
+    flex:1;min-height:340px;display:flex}
+  svg{display:block;width:100%;height:100%;touch-action:manipulation}
+
+  .target circle{fill:#fff;stroke:var(--ring);stroke-width:2.5;transition:stroke .12s,fill .12s}
+  .target text{fill:var(--ink);font-weight:700;text-anchor:middle;dominant-baseline:central;
+    font-family:inherit;pointer-events:none;user-select:none}
+  .target{cursor:pointer}
+  .target.next circle{stroke:var(--amber);stroke-width:4;fill:var(--amber-soft)}
+  .target.done circle{stroke:var(--teal);fill:var(--teal-soft)}
+  .target.done text{fill:var(--teal)}
+  .target.err circle{stroke:var(--error);fill:#FBE6E3}
+  .trail{fill:none;stroke:var(--teal);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
+
+  @media (prefers-reduced-motion:no-preference){
+    .target.next circle{animation:pulse 1.25s ease-in-out infinite}
+    @keyframes pulse{0%,100%{stroke-width:4}50%{stroke-width:7}}
+  }
+
+  /* overlay (start / result) */
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(243,246,247,.86);backdrop-filter:blur(2px);text-align:center;padding:20px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);
+    padding:28px 34px;max-width:480px;width:100%}
+  .card h2{margin:0 0 6px;font-size:24px}
+  .card p{margin:6px 0;color:var(--muted);font-size:15px;line-height:1.6}
+  .result-grid{display:flex;gap:14px;justify-content:center;margin:18px 0}
+  .result-grid .b{flex:1}
+  .result-grid .b .v{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums}
+  .result-grid .b .k{font-size:13px;color:var(--muted);font-weight:700}
+  .result-grid .b.err .v{color:var(--error)}
+  .card .start{margin-top:6px}
+
+  /* session log */
+  details{margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  summary{cursor:pointer;padding:12px 16px;font-weight:700;font-size:15px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:var(--muted)}
+  details[open] summary::before{content:"▾ "}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:8px 16px;text-align:left;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-size:11px;letter-spacing:.04em}
+  .empty{padding:0 16px 14px;color:var(--muted);font-size:14px}
+  footer{margin-top:18px;font-size:12px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>TMT 様式 机上課題トレーナー</h1>
+    <span class="sub">注意・処理速度・セットシフティングの練習用 ／ 配置は毎回ランダム</span>
+  </header>
+
+  <div class="bar">
+    <div class="ctl">
+      <span class="lab">課題</span>
+      <div class="seg" id="partSeg" role="group" aria-label="課題の種類">
+        <button data-part="A" aria-pressed="true">パートA（数字）</button>
+        <button data-part="B" aria-pressed="false">パートB（数字＋ひらがな）</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="lab">課題数</span>
+      <div class="seg" id="sizeSeg" role="group" aria-label="課題数">
+        <button data-size="10" aria-pressed="false">10</button>
+        <button data-size="15" aria-pressed="true">15</button>
+        <button data-size="20" aria-pressed="false">20</button>
+        <button data-size="25" aria-pressed="false">25</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="lab">効果音</span>
+      <div class="seg" id="soundSeg" role="group" aria-label="効果音">
+        <button data-sound="on" aria-pressed="false">オン</button>
+        <button data-sound="off" aria-pressed="true">オフ</button>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <button class="ghost" id="resetBtn" type="button">リセット</button>
+    <button class="start" id="startBtn" type="button">スタート</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">経過時間</div><div class="v" id="timeV">0.0<small>秒</small></div></div>
+    <div class="stat"><div class="k">進捗</div><div class="v" id="progV">0<small>/15</small></div></div>
+    <div class="stat err"><div class="k">エラー</div><div class="v" id="errV">0</div></div>
+  </div>
+
+  <div class="hint" id="hint"><b>進め方</b><span id="hintText">「1 → 2 → 3 …」の順に、できるだけ速く正確にタップしてください。</span></div>
+
+  <div class="stage">
+    <svg id="svg" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-label="課題エリア">
+      <polyline class="trail" id="trail" points=""></polyline>
+      <g id="targets"></g>
+    </svg>
+    <div class="overlay" id="overlay">
+      <div class="card" id="card">
+        <h2>準備ができたら開始</h2>
+        <p>「スタート」を押すと課題が表示されます。<br>最初の「1」をタップした瞬間から計測を始めます。</p>
+        <button class="start" id="overlayStart" type="button">スタート</button>
+      </div>
+    </div>
+  </div>
+
+  <details id="logBox">
+    <summary>今回のセッション記録</summary>
+    <div id="logEmpty" class="empty">まだ記録はありません。</div>
+    <table id="logTable" style="display:none">
+      <thead><tr><th>#</th><th>課題</th><th>数</th><th>所要時間</th><th>エラー</th></tr></thead>
+      <tbody id="logBody"></tbody>
+    </table>
+  </details>
+
+  <footer>
+    ※ 本アプリは TMT を模した「練習課題」です。標準化された TMT-J 検査用紙とは配置・項目が毎回異なります。再評価の妥当性を保つため、評価には標準 TMT-J をご使用ください。<br>
+    記録はこの画面を開いている間だけ保持されます（更新・再読込で消えます）。
+  </footer>
+</div>
+
+<script>
+(function(){
+  const KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ".split("");
+
+  let part="A", size=15, sound=false;
+  let seq=[], idx=0, errors=0, state="idle";
+  let t0=0, timerId=null;
+  let session=[];
+  /* geometry is recomputed from the real play-field size (iPad-friendly) */
+  let W=1000, H=640, R=38, PAD=70;
+
+  const $=id=>document.getElementById(id);
+  const svg=$("svg"), gTargets=$("targets"), trail=$("trail");
+  const stage=document.querySelector(".stage");
+
+  /* ---------- responsive geometry ---------- */
+  function geometry(){
+    const rect=stage.getBoundingClientRect();
+    W=Math.max(420,Math.round(rect.width  || svg.clientWidth  || 1000));
+    H=Math.max(320,Math.round(rect.height || svg.clientHeight || 640));
+    const base=Math.min(W,H);
+    R=Math.round(Math.max(30,Math.min(52,base/15)));   /* target size scales, stays touch-friendly */
+    PAD=Math.round(R*1.7);
+    svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  }
+  function fontFor(label){ return Math.round(label.length>1 ? R*0.8 : R*0.92); }
+
+  function onResize(){
+    const oldW=W, oldH=H;
+    geometry();
+    if(seq.length && oldW && oldH){
+      const sx=W/oldW, sy=H/oldH;
+      seq.forEach(t=>{ t.x*=sx; t.y*=sy; });
+      [...gTargets.children].forEach((g,i)=>{
+        const c=g.querySelector("circle"), tx=g.querySelector("text");
+        c.setAttribute("cx",seq[i].x); c.setAttribute("cy",seq[i].y); c.setAttribute("r",R);
+        tx.setAttribute("x",seq[i].x); tx.setAttribute("y",seq[i].y);
+        tx.setAttribute("font-size",fontFor(seq[i].label));
+      });
+      refreshStates();
+    }
+  }
+  window.addEventListener("resize",onResize);
+  window.addEventListener("orientationchange",()=>setTimeout(onResize,200));
+
+  /* ---------- audio (optional, generated, no files) ---------- */
+  let actx=null;
+  function beep(ok){
+    if(!sound) return;
+    try{
+      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      const o=actx.createOscillator(), g=actx.createGain();
+      o.connect(g); g.connect(actx.destination);
+      o.frequency.value = ok?660:180;
+      g.gain.setValueAtTime(.0001,actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.18,actx.currentTime+.01);
+      g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+(ok?.12:.22));
+      o.start(); o.stop(actx.currentTime+(ok?.13:.23));
+    }catch(e){}
+  }
+
+  /* ---------- sequence + placement ---------- */
+  function buildSequence(){
+    const arr=[];
+    if(part==="A"){
+      for(let i=1;i<=size;i++) arr.push(String(i));
+    }else{
+      let n=1,k=0;
+      for(let i=0;i<size;i++){
+        if(i%2===0) arr.push(String(n++));
+        else arr.push(KANA[k++]);
+      }
+    }
+    return arr;
+  }
+
+  function placeNonOverlap(count){
+    let minD = 2*R + (count<=10?70 : count<=15?52 : count<=20?40 : 30);
+    const pts=[];
+    for(let i=0;i<count;i++){
+      let placed=false, tries=0;
+      while(!placed){
+        tries++;
+        const x=PAD+Math.random()*(W-2*PAD);
+        const y=PAD+Math.random()*(H-2*PAD);
+        if(pts.every(p=>(p.x-x)**2+(p.y-y)**2 >= minD*minD)){
+          pts.push({x,y}); placed=true;
+        }else if(tries>500){ minD=Math.max(2*R+8,minD-6); tries=0; }
+      }
+    }
+    return pts;
+  }
+
+  /* ---------- render ---------- */
+  function render(){
+    gTargets.innerHTML="";
+    trail.setAttribute("points","");
+    seq.forEach((t,i)=>{
+      const g=document.createElementNS("http://www.w3.org/2000/svg","g");
+      g.setAttribute("class","target");
+      g.dataset.i=i;
+      const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+      c.setAttribute("cx",t.x); c.setAttribute("cy",t.y); c.setAttribute("r",R);
+      const tx=document.createElementNS("http://www.w3.org/2000/svg","text");
+      tx.setAttribute("x",t.x); tx.setAttribute("y",t.y);
+      tx.setAttribute("font-size",fontFor(t.label));
+      tx.textContent=t.label;
+      g.appendChild(c); g.appendChild(tx);
+      g.addEventListener("pointerdown",onTap);
+      gTargets.appendChild(g);
+    });
+    refreshStates();
+  }
+
+  function refreshStates(){
+    [...gTargets.children].forEach(g=>{
+      const i=+g.dataset.i;
+      g.classList.toggle("done", i<idx);
+      g.classList.toggle("next", i===idx && state!=="done");
+    });
+    const donePts=seq.slice(0,idx).map(t=>`${t.x},${t.y}`).join(" ");
+    trail.setAttribute("points",donePts);
+  }
+
+  /* ---------- interaction ---------- */
+  function onTap(e){
+    if(state!=="ready" && state!=="running") return;
+    const g=e.currentTarget, i=+g.dataset.i;
+    if(i<idx) return;               // already completed
+    if(i===idx){                    // correct
+      if(state==="ready"){ startTimer(); state="running"; }
+      idx++; beep(true);
+      if(idx>=seq.length){ finish(); } else { refreshStates(); }
+      $("progV").innerHTML = `${idx}<small>/${seq.length}</small>`;
+    }else{                          // wrong
+      errors++; beep(false);
+      $("errV").textContent = errors;
+      g.classList.add("err");
+      setTimeout(()=>g.classList.remove("err"),320);
+    }
+  }
+
+  /* ---------- timer ---------- */
+  function startTimer(){
+    t0=performance.now();
+    timerId=setInterval(()=>{
+      $("timeV").innerHTML = ((performance.now()-t0)/1000).toFixed(1)+"<small>秒</small>";
+    },50);
+  }
+  function stopTimer(){ if(timerId){clearInterval(timerId);timerId=null;} return (performance.now()-t0)/1000; }
+
+  /* ---------- flow ---------- */
+  function newRound(){
+    geometry();
+    const labels=buildSequence();
+    const pts=placeNonOverlap(labels.length);
+    seq=labels.map((label,i)=>({label,x:pts[i].x,y:pts[i].y}));
+    idx=0; errors=0; state="ready";
+    $("timeV").innerHTML="0.0<small>秒</small>";
+    $("errV").textContent="0";
+    $("progV").innerHTML=`0<small>/${seq.length}</small>`;
+    $("overlay").style.display="none";
+    render();
+  }
+
+  function finish(){
+    const secs=stopTimer();
+    state="done";
+    $("timeV").innerHTML=secs.toFixed(1)+"<small>秒</small>";
+    refreshStates();
+    session.unshift({part,size:seq.length,secs,errors});
+    renderLog();
+    showResult(secs);
+  }
+
+  function showResult(secs){
+    $("card").innerHTML =
+      `<h2>完了しました</h2>
+       <div class="result-grid">
+         <div class="b"><div class="v">${secs.toFixed(1)}</div><div class="k">所要時間（秒）</div></div>
+         <div class="b err"><div class="v">${errors}</div><div class="k">エラー数</div></div>
+       </div>
+       <p>${part==="A"?"パートA（数字）":"パートB（数字＋ひらがな）"} ／ ${seq.length}項目</p>
+       <button class="start" id="again" type="button">新しい問題でもう一度</button>`;
+    $("overlay").style.display="flex";
+    $("again").addEventListener("click",newRound);
+  }
+
+  function showStartCard(){
+    state="idle";
+    $("card").innerHTML =
+      `<h2>準備ができたら開始</h2>
+       <p>「スタート」を押すと課題が表示されます。<br>最初の「1」をタップした瞬間から計測を始めます。</p>
+       <button class="start" id="overlayStart" type="button">スタート</button>`;
+    $("overlay").style.display="flex";
+    $("overlayStart").addEventListener("click",newRound);
+  }
+
+  function renderLog(){
+    if(session.length===0){ $("logEmpty").style.display="block"; $("logTable").style.display="none"; return; }
+    $("logEmpty").style.display="none"; $("logTable").style.display="table";
+    $("logBody").innerHTML = session.map((s,n)=>
+      `<tr><td>${session.length-n}</td><td>${s.part==="A"?"A 数字":"B 数字+かな"}</td>
+       <td>${s.size}</td><td>${s.secs.toFixed(1)} 秒</td><td>${s.errors}</td></tr>`).join("");
+  }
+
+  function updateHint(){
+    $("hintText").textContent = part==="A"
+      ? "「1 → 2 → 3 …」の順に、できるだけ速く正確にタップしてください。"
+      : "「1 → あ → 2 → い → 3 …」のように、数字とひらがなを交互にタップしてください。";
+  }
+
+  /* ---------- controls ---------- */
+  function bindSeg(segId, fn){
+    $(segId).addEventListener("click",e=>{
+      const b=e.target.closest("button"); if(!b) return;
+      [...e.currentTarget.children].forEach(x=>x.setAttribute("aria-pressed","false"));
+      b.setAttribute("aria-pressed","true"); fn(b);
+    });
+  }
+  bindSeg("partSeg", b=>{ part=b.dataset.part; updateHint(); showStartCard(); });
+  bindSeg("sizeSeg", b=>{ size=+b.dataset.size; $("progV").innerHTML=`0<small>/${size}</small>`; showStartCard(); });
+  bindSeg("soundSeg", b=>{ sound=(b.dataset.sound==="on"); if(sound) beep(true); });
+
+  $("startBtn").addEventListener("click",newRound);
+  $("overlayStart").addEventListener("click",newRound);
+  $("resetBtn").addEventListener("click",showStartCard);
+
+  geometry();
+  window.addEventListener("load",geometry);
+  updateHint();
+  renderLog();
+})();
+</script>
+</body>
+</html>
