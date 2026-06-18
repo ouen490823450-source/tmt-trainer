@@ -138,14 +138,12 @@
     @keyframes pulse{0%,100%{stroke-width:4}50%{stroke-width:7}}
   }
 
-  /* 点灯: keep the amber highlight but stop the blinking (calmer guide) */
-  body.guide-steady .target.next circle{animation:none}
   /* なし: the next target looks like any idle one — no amber colour, no pulse */
   body.guide-off .target.next circle{stroke:var(--ring);stroke-width:2.5;fill:#fff;animation:none}
 
   /* overlay (start / result) */
   .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    background:rgba(243,246,247,.86);backdrop-filter:blur(2px);text-align:center;padding:20px}
+    background:rgba(243,246,247,.86);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);text-align:center;padding:20px}
   .card{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);
     padding:28px 34px;max-width:480px;width:100%}
   .card h2{margin:0 0 6px;font-size:24px}
@@ -196,25 +194,26 @@
     <div class="ctl">
       <span class="lab">課題数</span>
       <div class="seg" id="sizeSeg" role="group" aria-label="課題数">
+        <button data-size="5" aria-pressed="false">5</button>
         <button data-size="10" aria-pressed="false">10</button>
         <button data-size="15" aria-pressed="true">15</button>
         <button data-size="20" aria-pressed="false">20</button>
         <button data-size="25" aria-pressed="false">25</button>
+        <button data-size="30" aria-pressed="false">30</button>
       </div>
     </div>
     <div class="ctl">
       <span class="lab">大きさ</span>
       <div class="seg" id="scaleSeg" role="group" aria-label="目標の大きさ">
+        <button data-scale="0.8" aria-pressed="false">小さい</button>
         <button data-scale="1" aria-pressed="true">標準</button>
         <button data-scale="1.4" aria-pressed="false">大きい</button>
-        <button data-scale="1.8" aria-pressed="false">特大</button>
       </div>
     </div>
     <div class="ctl">
       <span class="lab">誘導</span>
       <div class="seg" id="guideSeg" role="group" aria-label="次の数字の誘導表示">
         <button data-guide="blink" aria-pressed="true">点滅</button>
-        <button data-guide="steady" aria-pressed="false">点灯</button>
         <button data-guide="off" aria-pressed="false">なし</button>
       </div>
     </div>
@@ -244,7 +243,7 @@
   <div class="stage">
     <svg id="svg" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-label="課題エリア">
       <polyline class="trail" id="trail" points=""></polyline>
-      <path class="pen" id="penPath" d=""></path>
+      <g class="pen" id="penInk"></g>
       <g id="targets"></g>
     </svg>
     <div class="overlay" id="overlay">
@@ -275,16 +274,16 @@
 (function(){
   const KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ".split("");
 
-  let part="A", size=15, sound=false, guideMode="blink", mode="tap";   /* guideMode: blink|steady|off ; mode: tap|trace */
+  let part="A", size=15, sound=false, guideMode="blink", mode="tap";   /* guideMode: blink|off ; mode: tap|trace */
   let seq=[], idx=0, errors=0, state="idle";
   let t0=0, timerId=null;
   let session=[];
-  let penD="", drawing=false, lastPt=null, errAt=0;   /* trace-mode pen state */
+  let drawing=false, lastPt=null, errAt=0, penPts=[], penActive=null, penDirty=false, penRAF=0, ctmInv=null;   /* trace-mode pen state */
   /* geometry is recomputed from the real play-field size (iPad-friendly) */
   let W=1000, H=640, R=38, PAD=70, tscale=1;   /* tscale: user-chosen target size for easier practice */
 
   const $=id=>document.getElementById(id);
-  const svg=$("svg"), gTargets=$("targets"), trail=$("trail"), penPath=$("penPath");
+  const svg=$("svg"), gTargets=$("targets"), trail=$("trail"), penInk=$("penInk");
   const stage=document.querySelector(".stage");
 
   /* ---------- responsive geometry ---------- */
@@ -298,7 +297,7 @@
     R=Math.round(r);
     PAD=Math.round(R*1.6);
     svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
-    penPath.style.strokeWidth=Math.max(4,Math.round(R*0.13))+"px";   /* pen line scales with target size */
+    penInk.style.strokeWidth=Math.max(4,Math.round(R*0.13))+"px";   /* pen line scales with target size */
   }
   function fontFor(label){ return Math.round(label.length>1 ? R*0.8 : R*0.92); }
 
@@ -316,7 +315,7 @@
       });
       refreshStates();
     }
-    penD=""; penPath.setAttribute("d","");   /* drawn line is in old coords after a resize; clear it */
+    clearInk();   /* drawn line is in old coords after a resize; clear it */
   }
   window.addEventListener("resize",onResize);
   window.addEventListener("orientationchange",()=>setTimeout(onResize,200));
@@ -353,7 +352,8 @@
   }
 
   function placeNonOverlap(count){
-    let minD = 2*R + (count<=10?70 : count<=15?52 : count<=20?40 : 30);
+    let minD = 2*R + (count<=10?70 : count<=15?52 : count<=20?40 : count<=25?30 : 22);
+    const floor = 2*R + 4;                        // centres this close: circles touch but don't overlap
     const pts=[];
     for(let i=0;i<count;i++){
       let placed=false, tries=0;
@@ -363,7 +363,10 @@
         const y=PAD+Math.random()*(H-2*PAD);
         if(pts.every(p=>(p.x-x)**2+(p.y-y)**2 >= minD*minD)){
           pts.push({x,y}); placed=true;
-        }else if(tries>500){ minD=Math.max(2*R+8,minD-6); tries=0; }
+        }else{
+          if(tries%300===0) minD=Math.max(floor,minD-6);   // gradually relax the spacing
+          if(tries>2500){ pts.push({x,y}); placed=true; }   // can't fit (e.g. 30×特大): accept & never hang
+        }
       }
     }
     return pts;
@@ -373,7 +376,7 @@
   function render(){
     gTargets.innerHTML="";
     trail.setAttribute("points","");
-    penD=""; penPath.setAttribute("d","");
+    clearInk();
     seq.forEach((t,i)=>{
       const g=document.createElementNS("http://www.w3.org/2000/svg","g");
       g.setAttribute("class","target");
@@ -420,16 +423,45 @@
     }
   }
 
-  /* ---------- trace mode: draw a continuous line with a stylus/finger (closer to real TMT) ---------- */
+  /* ---------- trace mode: draw a continuous line with a stylus/finger (closer to real TMT) ----------
+     iPad Pro fires pointermove extremely often (120Hz display + Pencil up to 240Hz). To stay smooth we
+     (a) cache the coordinate transform once per stroke, (b) thin points by distance, (c) update the SVG
+     at most once per animation frame, and (d) split the ink into fixed-size chunks so each frame only
+     re-renders a short tail instead of the whole, ever-growing line (avoids O(n^2) work).            */
+  const SVGNS="http://www.w3.org/2000/svg";
   function toSvg(e){
     const pt=svg.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
-    const ctm=svg.getScreenCTM(); if(!ctm) return {x:0,y:0};
-    const q=pt.matrixTransform(ctm.inverse());
+    const m=ctmInv||(svg.getScreenCTM()&&svg.getScreenCTM().inverse());
+    if(!m) return {x:0,y:0};
+    const q=pt.matrixTransform(m);
     return {x:q.x, y:q.y};
   }
-  function penAppend(p,newSub){
-    penD += (newSub?` M ${p.x.toFixed(1)} ${p.y.toFixed(1)}`:` L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
-    penPath.setAttribute("d",penD.trim());
+  function clearInk(){
+    if(penRAF){ cancelAnimationFrame(penRAF); penRAF=0; }
+    penDirty=false; penActive=null; penPts=[]; penInk.textContent="";
+    drawing=false; lastPt=null; ctmInv=null; errAt=0;   /* drop any in-progress stroke state */
+  }
+  function newChunk(start){
+    penActive=document.createElementNS(SVGNS,"path");
+    penInk.appendChild(penActive);
+    penPts=[start]; renderActive();
+  }
+  function renderActive(){
+    if(!penActive||!penPts.length) return;
+    let d="M "+penPts[0].x.toFixed(1)+" "+penPts[0].y.toFixed(1);
+    for(let i=1;i<penPts.length;i++) d+=" L "+penPts[i].x.toFixed(1)+" "+penPts[i].y.toFixed(1);
+    penActive.setAttribute("d",d);
+  }
+  function flushInk(){ penRAF=0; if(penDirty){ penDirty=false; renderActive(); } }
+  function pushPoint(p){
+    if(!penActive){ newChunk(p); return; }
+    penPts.push(p);
+    if(penPts.length>=140){              // freeze this chunk (now static) and start a fresh tail
+      renderActive(); newChunk(p);
+    }else{
+      penDirty=true;
+      if(!penRAF) penRAF=requestAnimationFrame(flushInk);
+    }
   }
   function checkReach(p){
     if(idx>=seq.length) return;
@@ -459,17 +491,23 @@
     if(state!=="ready" && state!=="running") return;
     drawing=true;
     try{ svg.setPointerCapture(e.pointerId); }catch(_){}
-    const p=toSvg(e); lastPt=p; penAppend(p,true); checkReach(p);
+    const ctm=svg.getScreenCTM(); ctmInv=ctm?ctm.inverse():null;   // cache transform for the whole stroke
+    const p=toSvg(e); lastPt=p; newChunk(p); checkReach(p);
     e.preventDefault();
   }
   function penMove(e){
     if(!drawing || mode!=="trace") return;
-    const p=toSvg(e);
-    if(lastPt && (p.x-lastPt.x)**2+(p.y-lastPt.y)**2 < 9) return;   // skip sub-pixel jitter
-    lastPt=p; penAppend(p,false); checkReach(p);
+    const minStep=Math.max(5,R*0.15), mind2=minStep*minStep;
+    const co=e.getCoalescedEvents?e.getCoalescedEvents():null;       // catch the fast Pencil samples
+    const list=(co&&co.length)?co:[e];
+    for(let k=0;k<list.length;k++){
+      const p=toSvg(list[k]);
+      if(lastPt){ const dx=p.x-lastPt.x, dy=p.y-lastPt.y; if(dx*dx+dy*dy<mind2) continue; }
+      lastPt=p; pushPoint(p); checkReach(p);
+    }
     e.preventDefault();
   }
-  function penUp(){ drawing=false; lastPt=null; }
+  function penUp(){ drawing=false; lastPt=null; ctmInv=null; if(penRAF){cancelAnimationFrame(penRAF);penRAF=0;} renderActive(); }
   svg.addEventListener("pointerdown",penDown);
   svg.addEventListener("pointermove",penMove);
   svg.addEventListener("pointerup",penUp);
@@ -477,6 +515,7 @@
 
   /* ---------- timer ---------- */
   function startTimer(){
+    if(timerId) clearInterval(timerId);   // never run two timers at once
     t0=performance.now();
     timerId=setInterval(()=>{
       $("timeV").innerHTML = ((performance.now()-t0)/1000).toFixed(1)+"<small>秒</small>";
@@ -486,6 +525,7 @@
 
   /* ---------- flow ---------- */
   function newRound(){
+    stopTimer();                 // clear any timer left running from an unfinished round
     geometry();
     const labels=buildSequence();
     const pts=placeNonOverlap(labels.length);
@@ -522,6 +562,7 @@
   }
 
   function showStartCard(){
+    stopTimer();                 // changing settings / リセット must not leave the timer ticking
     state="idle";
     $("card").innerHTML =
       `<h2>準備ができたら開始</h2>
@@ -564,9 +605,8 @@
   bindSeg("soundSeg", b=>{ sound=(b.dataset.sound==="on"); if(sound) beep(true); });
   bindSeg("scaleSeg", b=>{ tscale=parseFloat(b.dataset.scale); newRound(); });   /* show new size at once */
   bindSeg("guideSeg", b=>{
-    guideMode=b.dataset.guide;                                   // blink | steady | off
-    document.body.classList.toggle("guide-steady",guideMode==="steady");
-    document.body.classList.toggle("guide-off",   guideMode==="off");
+    guideMode=b.dataset.guide;                                   // blink | off
+    document.body.classList.toggle("guide-off", guideMode==="off");
   });
   bindSeg("modeSeg", b=>{
     mode=b.dataset.mode;                                         // tap | trace
