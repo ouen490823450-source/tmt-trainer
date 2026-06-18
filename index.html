@@ -129,6 +129,9 @@
   .target.done text{fill:var(--teal)}
   .target.err circle{stroke:var(--error);fill:#FBE6E3}
   .trail{fill:none;stroke:var(--teal);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
+  .pen{fill:none;stroke:var(--teal);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;opacity:.8}
+  body.mode-trace .trail{display:none}      /* trace: the patient's own drawn line replaces the auto link */
+  body.mode-trace #svg{touch-action:none}   /* draw with stylus/finger instead of scrolling */
 
   @media (prefers-reduced-motion:no-preference){
     .target.next circle{animation:pulse 1.25s ease-in-out infinite}
@@ -184,6 +187,13 @@
       </div>
     </div>
     <div class="ctl">
+      <span class="lab">操作</span>
+      <div class="seg" id="modeSeg" role="group" aria-label="操作方法">
+        <button data-mode="tap" aria-pressed="true">タップ</button>
+        <button data-mode="trace" aria-pressed="false">なぞり</button>
+      </div>
+    </div>
+    <div class="ctl">
       <span class="lab">課題数</span>
       <div class="seg" id="sizeSeg" role="group" aria-label="課題数">
         <button data-size="10" aria-pressed="false">10</button>
@@ -234,12 +244,13 @@
   <div class="stage">
     <svg id="svg" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-label="課題エリア">
       <polyline class="trail" id="trail" points=""></polyline>
+      <path class="pen" id="penPath" d=""></path>
       <g id="targets"></g>
     </svg>
     <div class="overlay" id="overlay">
       <div class="card" id="card">
         <h2>準備ができたら開始</h2>
-        <p>「スタート」を押すと課題が表示されます。<br>最初の「1」をタップした瞬間から計測を始めます。</p>
+        <p>「スタート」を押すと課題が表示されます。<br>最初の「1」に触れた瞬間から計測を始めます。</p>
         <button class="start" id="overlayStart" type="button">スタート</button>
       </div>
     </div>
@@ -264,15 +275,16 @@
 (function(){
   const KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ".split("");
 
-  let part="A", size=15, sound=false, guideMode="blink";   /* blink | steady | off */
+  let part="A", size=15, sound=false, guideMode="blink", mode="tap";   /* guideMode: blink|steady|off ; mode: tap|trace */
   let seq=[], idx=0, errors=0, state="idle";
   let t0=0, timerId=null;
   let session=[];
+  let penD="", drawing=false, lastPt=null, errAt=0;   /* trace-mode pen state */
   /* geometry is recomputed from the real play-field size (iPad-friendly) */
   let W=1000, H=640, R=38, PAD=70, tscale=1;   /* tscale: user-chosen target size for easier practice */
 
   const $=id=>document.getElementById(id);
-  const svg=$("svg"), gTargets=$("targets"), trail=$("trail");
+  const svg=$("svg"), gTargets=$("targets"), trail=$("trail"), penPath=$("penPath");
   const stage=document.querySelector(".stage");
 
   /* ---------- responsive geometry ---------- */
@@ -286,6 +298,7 @@
     R=Math.round(r);
     PAD=Math.round(R*1.6);
     svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+    penPath.style.strokeWidth=Math.max(4,Math.round(R*0.13))+"px";   /* pen line scales with target size */
   }
   function fontFor(label){ return Math.round(label.length>1 ? R*0.8 : R*0.92); }
 
@@ -303,6 +316,7 @@
       });
       refreshStates();
     }
+    penD=""; penPath.setAttribute("d","");   /* drawn line is in old coords after a resize; clear it */
   }
   window.addEventListener("resize",onResize);
   window.addEventListener("orientationchange",()=>setTimeout(onResize,200));
@@ -359,6 +373,7 @@
   function render(){
     gTargets.innerHTML="";
     trail.setAttribute("points","");
+    penD=""; penPath.setAttribute("d","");
     seq.forEach((t,i)=>{
       const g=document.createElementNS("http://www.w3.org/2000/svg","g");
       g.setAttribute("class","target");
@@ -388,6 +403,7 @@
 
   /* ---------- interaction ---------- */
   function onTap(e){
+    if(mode!=="tap") return;
     if(state!=="ready" && state!=="running") return;
     const g=e.currentTarget, i=+g.dataset.i;
     if(i<idx) return;               // already completed
@@ -403,6 +419,61 @@
       setTimeout(()=>g.classList.remove("err"),320);
     }
   }
+
+  /* ---------- trace mode: draw a continuous line with a stylus/finger (closer to real TMT) ---------- */
+  function toSvg(e){
+    const pt=svg.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+    const ctm=svg.getScreenCTM(); if(!ctm) return {x:0,y:0};
+    const q=pt.matrixTransform(ctm.inverse());
+    return {x:q.x, y:q.y};
+  }
+  function penAppend(p,newSub){
+    penD += (newSub?` M ${p.x.toFixed(1)} ${p.y.toFixed(1)}`:` L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
+    penPath.setAttribute("d",penD.trim());
+  }
+  function checkReach(p){
+    if(idx>=seq.length) return;
+    const nx=seq[idx];
+    if((p.x-nx.x)**2+(p.y-nx.y)**2 <= R*R){            // reached the next target in order
+      if(state==="ready"){ startTimer(); state="running"; }
+      idx++; beep(true);
+      if(idx>=seq.length){ finish(); } else { refreshStates(); }
+      $("progV").innerHTML=`${idx}<small>/${seq.length}</small>`;
+      return;
+    }
+    for(let j=idx+1;j<seq.length;j++){                 // line passed through a wrong (out-of-order) target
+      const t=seq[j];
+      if((p.x-t.x)**2+(p.y-t.y)**2 <= R*R){
+        const now=performance.now();
+        if(now-errAt>500){
+          errors++; beep(false); $("errV").textContent=errors;
+          const g=gTargets.children[j]; if(g){ g.classList.add("err"); setTimeout(()=>g.classList.remove("err"),320); }
+          errAt=now;
+        }
+        break;
+      }
+    }
+  }
+  function penDown(e){
+    if(mode!=="trace") return;
+    if(state!=="ready" && state!=="running") return;
+    drawing=true;
+    try{ svg.setPointerCapture(e.pointerId); }catch(_){}
+    const p=toSvg(e); lastPt=p; penAppend(p,true); checkReach(p);
+    e.preventDefault();
+  }
+  function penMove(e){
+    if(!drawing || mode!=="trace") return;
+    const p=toSvg(e);
+    if(lastPt && (p.x-lastPt.x)**2+(p.y-lastPt.y)**2 < 9) return;   // skip sub-pixel jitter
+    lastPt=p; penAppend(p,false); checkReach(p);
+    e.preventDefault();
+  }
+  function penUp(){ drawing=false; lastPt=null; }
+  svg.addEventListener("pointerdown",penDown);
+  svg.addEventListener("pointermove",penMove);
+  svg.addEventListener("pointerup",penUp);
+  svg.addEventListener("pointercancel",penUp);
 
   /* ---------- timer ---------- */
   function startTimer(){
@@ -454,7 +525,7 @@
     state="idle";
     $("card").innerHTML =
       `<h2>準備ができたら開始</h2>
-       <p>「スタート」を押すと課題が表示されます。<br>最初の「1」をタップした瞬間から計測を始めます。</p>
+       <p>「スタート」を押すと課題が表示されます。<br>最初の「1」に触れた瞬間から計測を始めます。</p>
        <button class="start" id="overlayStart" type="button">スタート</button>`;
     $("overlay").style.display="flex";
     $("overlayStart").addEventListener("click",newRound);
@@ -469,9 +540,15 @@
   }
 
   function updateHint(){
-    $("hintText").textContent = part==="A"
-      ? "「1 → 2 → 3 …」の順に、できるだけ速く正確にタップしてください。"
-      : "「1 → あ → 2 → い → 3 …」のように、数字とひらがなを交互にタップしてください。";
+    if(mode==="trace"){
+      $("hintText").textContent = part==="A"
+        ? "タッチペン（指）で「1→2→3…」を順に線でつないでください。"
+        : "タッチペン（指）で「1→あ→2→い…」を数字とかな交互に線でつないでください。";
+    }else{
+      $("hintText").textContent = part==="A"
+        ? "「1 → 2 → 3 …」の順に、できるだけ速く正確にタップしてください。"
+        : "「1 → あ → 2 → い → 3 …」のように、数字とひらがなを交互にタップしてください。";
+    }
   }
 
   /* ---------- controls ---------- */
@@ -490,6 +567,12 @@
     guideMode=b.dataset.guide;                                   // blink | steady | off
     document.body.classList.toggle("guide-steady",guideMode==="steady");
     document.body.classList.toggle("guide-off",   guideMode==="off");
+  });
+  bindSeg("modeSeg", b=>{
+    mode=b.dataset.mode;                                         // tap | trace
+    document.body.classList.toggle("mode-trace",mode==="trace");
+    updateHint();
+    newRound();                                                 // start fresh with the new input method
   });
 
   $("startBtn").addEventListener("click",newRound);
